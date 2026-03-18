@@ -8,10 +8,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/**
- * All network API calls — mirrors the C# MainForm HTTP logic.
- * Must be called from a background (IO) dispatcher.
- */
 class ApiService {
 
     private val client = OkHttpClient.Builder()
@@ -20,26 +16,22 @@ class ApiService {
         .addInterceptor { chain ->
             val req = chain.request().newBuilder()
                 .header("User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                 .header("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8")
                 .build()
             chain.proceed(req)
         }
         .build()
 
-    /* ══════════════════════════════════════════════════════
-       YouTube InnerTube search
-    ══════════════════════════════════════════════════════ */
     fun searchYouTube(query: String): JSONArray {
         val KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
         val url = "https://www.youtube.com/youtubei/v1/search?key=$KEY&prettyPrint=false"
         val bodyJson = JSONObject().apply {
             put("context", JSONObject().apply {
                 put("client", JSONObject().apply {
-                    put("clientName", "ANDROID")
-                    put("clientVersion", "19.09.37")
-                    put("androidSdkVersion", 30)
+                    put("clientName", "WEB")
+                    put("clientVersion", "2.20240101.00.00")
                     put("hl", "ko")
                     put("gl", "KR")
                 })
@@ -51,8 +43,8 @@ class ApiService {
         val req = Request.Builder()
             .url(url)
             .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
-            .header("X-YouTube-Client-Name", "3")
-            .header("X-YouTube-Client-Version", "19.09.37")
+            .header("X-YouTube-Client-Name", "1")
+            .header("X-YouTube-Client-Version", "2.20240101.00.00")
             .header("Origin", "https://www.youtube.com")
             .header("Referer", "https://www.youtube.com/")
             .build()
@@ -69,6 +61,8 @@ class ApiService {
             val doc = JSONObject(json)
             val sections = doc
                 .getJSONObject("contents")
+                .getJSONObject("twoColumnSearchResultsRenderer")
+                .getJSONObject("primaryContents")
                 .getJSONObject("sectionListRenderer")
                 .getJSONArray("contents")
 
@@ -90,7 +84,7 @@ class ApiService {
                         ?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: ""
 
                     val durStr = vr.optJSONObject("lengthText")?.optString("simpleText") ?: ""
-                    val dur    = parseDuration(durStr)
+                    val dur = parseDuration(durStr)
 
                     if (!isMusicVideo(title, ch, dur)) continue
 
@@ -133,9 +127,6 @@ class ApiService {
         } catch (e: Exception) { 0 }
     }
 
-    /* ══════════════════════════════════════════════════════
-       YouTube autocomplete suggestions
-    ══════════════════════════════════════════════════════ */
     fun getSuggestions(query: String): JSONArray {
         val url = "https://suggestqueries.google.com/complete/search" +
                   "?client=firefox&ds=yt&q=${encode(query)}&hl=ko"
@@ -156,9 +147,6 @@ class ApiService {
         return sugs
     }
 
-    /* ══════════════════════════════════════════════════════
-       Lyrics — lrclib.net
-    ══════════════════════════════════════════════════════ */
     fun fetchLyrics(rawTitle: String, channel: String, ytDuration: Double): JSONArray? {
         val title  = cleanTitle(rawTitle)
         val artist = cleanArtist(channel)
@@ -240,8 +228,6 @@ class ApiService {
         }
         return result
     }
-
-    /* ── String helpers ─────────────────────────────── */
 
     private fun cleanTitle(t: String): String {
         var s = t
