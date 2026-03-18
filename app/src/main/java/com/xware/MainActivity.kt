@@ -4,15 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.view.View
 import android.webkit.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -22,75 +18,81 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Edge-to-edge display — app draws behind status/nav bars
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
-
         setupWebView()
         loadApp()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
+        // YouTube 재생을 위해 데스크탑 Chrome UA 사용
+        val desktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/124.0.0.0 Safari/537.36"
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled  = true
+            databaseEnabled   = true
             mediaPlaybackRequiresUserGesture = false
-            allowFileAccess  = true
+            allowFileAccess   = true
             allowContentAccess = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            cacheMode = WebSettings.LOAD_DEFAULT
-            userAgentString =
-                "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
-                "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/124.0.0.0 Mobile Safari/537.36 XWare/1.0"
+            mixedContentMode  = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            cacheMode         = WebSettings.LOAD_DEFAULT
+            userAgentString   = desktopUA
             setSupportZoom(false)
             builtInZoomControls  = false
             displayZoomControls  = false
+            // 자바스크립트로 window.open 허용 (YouTube IFrame 필요)
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(false)
         }
 
-        // Dark background while loading
         webView.setBackgroundColor(Color.parseColor("#06060F"))
+
+        // 쿠키 허용
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
 
         bridge = AndroidBridge(this, webView)
         webView.addJavascriptInterface(bridge, "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
+            override fun shouldOverrideUrlLoading(
+                view: WebView, req: WebResourceRequest
+            ): Boolean {
                 val url = req.url.toString()
-                // Allow file:// and YouTube iframe assets
                 if (url.startsWith("file://") ||
-                    url.contains("youtube.com/iframe_api") ||
+                    url.contains("youtube.com") ||
                     url.contains("googlevideo.com") ||
-                    url.contains("ytimg.com"))
+                    url.contains("ytimg.com") ||
+                    url.contains("googleapis.com"))
                     return false
-                // Open external URLs in the system browser
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 return true
             }
 
-            override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
-                // Silently ignore sub-resource errors (fonts, etc.)
-                if (req.isForMainFrame) {
+            override fun onReceivedError(
+                view: WebView, req: WebResourceRequest, err: WebResourceError
+            ) {
+                if (req.isForMainFrame)
                     view.loadUrl("file:///android_asset/index.html")
-                }
             }
         }
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
-                request.grant(request.resources) // grant audio/video for YT
+                request.grant(request.resources)
             }
             override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
-                // Forward console messages for debugging
                 android.util.Log.d("XWare/JS",
-                    "[${msg.messageLevel()}] ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}")
+                    "[${msg.messageLevel()}] ${msg.message()}")
                 return true
             }
         }
@@ -100,19 +102,16 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl("file:///android_asset/index.html")
     }
 
-    // Called from WebView JS via AndroidBridge to handle the back button
     fun handleBack() {
         runOnUiThread {
-            // Pass back event to JS first; JS will call AndroidBridge.exitApp() if needed
-            webView.evaluateJavascript("window.androidBack && window.androidBack()", null)
+            webView.evaluateJavascript(
+                "window.androidBack && window.androidBack()", null)
         }
     }
 
-    override fun onBackPressed() {
-        handleBack()
-    }
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() { handleBack() }
 
-    /** Send a JSON string back to the WebView's __xw() receiver */
     fun sendToWebView(json: String) {
         runOnUiThread {
             val escaped = json
@@ -120,25 +119,22 @@ class MainActivity : AppCompatActivity() {
                 .replace("'", "\\'")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
-            webView.evaluateJavascript("window.__xw && window.__xw('$escaped')", null)
+            webView.evaluateJavascript(
+                "window.__xw && window.__xw('$escaped')", null)
         }
     }
 
-    // Request SYSTEM_ALERT_WINDOW permission for lyrics overlay
     fun requestOverlayPermission() {
         if (!Settings.canDrawOverlays(this)) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            startActivityForResult(intent, REQ_OVERLAY)
+            startActivityForResult(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")), REQ_OVERLAY)
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_OVERLAY) {
-            // Notify JS that permission result is back
             val granted = Settings.canDrawOverlays(this)
             runOnUiThread {
                 webView.evaluateJavascript(
@@ -147,23 +143,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        webView.onResume()
-    }
+    override fun onResume()  { super.onResume();  webView.onResume() }
+    override fun onPause()   { super.onPause();   webView.onPause() }
+    override fun onDestroy() { bridge.destroy();  webView.destroy(); super.onDestroy() }
 
-    override fun onPause() {
-        super.onPause()
-        webView.onPause()
-    }
-
-    override fun onDestroy() {
-        bridge.destroy()
-        webView.destroy()
-        super.onDestroy()
-    }
-
-    companion object {
-        const val REQ_OVERLAY = 1001
-    }
+    companion object { const val REQ_OVERLAY = 1001 }
 }
